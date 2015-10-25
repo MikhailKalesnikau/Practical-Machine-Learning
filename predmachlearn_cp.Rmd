@@ -1,0 +1,101 @@
+---
+title: "Practical Machine Learning - Prediction Assignment Writeup"
+author: "Mikhail Kalesnikau"
+date: "October 25, 2015"
+output: html_document
+---
+
+```{r, echo = F, message = F}
+options(warn = -1)
+library(ggplot2)
+library(caret)
+library(doParallel)
+library(randomForest)
+```
+
+## Loading and pre-processing the data
+
+Downloading the pml_training and testing datasets and reading csv files.
+
+```{r}
+filePath <- "./data/pml-training.csv"
+if (!file.exists(filePath)) {
+    fileURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-pml_training.csv"
+    message("Downloading pml_training data set...")
+    download.file(url = fileURL, destfile = filePath)
+}
+pml_training <- read.csv(filePath, na.strings = c("#DIV/0!"))
+
+filePath <- "./data/pml-testing.csv"
+if (!file.exists(filePath)) {
+    fileURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+    message("Downloading testing data set...")
+    download.file(url = fileURL, destfile = filePath)
+}
+pml_testing <- read.csv(filePath, na.strings = c("#DIV/0!"))
+```
+
+Removing first seven variables as they don't represent predictors.
+
+```{r}
+pml_training <- pml_training[, -c(1:7)]
+```
+
+Removing near zero covariates
+
+```{r}
+nzero <- nearZeroVar(pml_training, saveMetrics = T)
+pml_training <- pml_training[, !nzero$nzv]
+```
+
+Removing variables with more than 50% missing values
+
+```{r}
+miss <- sapply(colnames(pml_training), function(x) return (sum(is.na(pml_training[, x])) > 0.5 * nrow(pml_training)))
+pml_training <- pml_training[, !miss]
+```
+
+The training set has `r nrow(pml_training)` samples and `r ncol(pml_training) - 1` potential predictors after cleaning.          
+
+## Random forests model and cross validation
+
+* Building random forests model.
+* Performing 5-fold cross validation to predict **classe** with all other predictors.    
+* Plotting model accuracy.
+
+```{r}
+set.seed(555)
+registerDoParallel()
+if (file.exists("fit_rf.Rda")) {
+    load("fit_rf.Rda") } else {
+    fit_rf <- train(classe ~ ., method = "rf", data = pml_training, importance = T, trControl = trainControl(method = "cv", number = 5))
+}
+fit_rf
+plot(fit_rf)
+imp <- varImp(fit_rf)$importance
+imp$max <- apply(imp, 1, max)
+imp <- imp[order(imp$max, decreasing = T), ]
+```
+
+The random forests algorithm built a model with **accuracy** of **99.41%** as we see from the report table.
+
+## Prediction
+
+* The random forests model contains 500 trees with 27 variables tried at each split. The five most important predictors in this model are __`r rownames(imp)[1:5]`__.
+* Estimated **out of sample error** rate for the random forests model is **0.45%** as reported by the final model.
+* Predict the test set and output results for automatic grader.
+
+```{r, message = F}
+fit_rf$finalModel
+prediction <- as.character(predict(fit_rf, pml_testing))
+```
+```{r, eval = F}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("./prediction/problem_id_", i, ".txt")
+    write.table(x[i], file = filename, quote = FALSE, row.names = FALSE, col.names = FALSE)
+  }
+}
+pml_write_files(prediction)
+```
